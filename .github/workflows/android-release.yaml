@@ -1,0 +1,89 @@
+name: Android Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      versionName:
+        description: 'Version Name (eg. 1.2.3)'
+        required: true
+        type: string
+      versionCode:
+        description: 'Version Code (integer, eg. 1)'
+        required: true
+        type: string
+      changelog:
+        description: 'release note'
+        required: false
+        type: string
+        default: ''
+      draft:
+        description: 'Create release as draft?'
+        required: true
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark release as pre-release?'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_KEYSTORE_PATH: app/release.keystore
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Decode keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+
+      - name: Build Release APK
+        run: |
+          ./gradlew assembleRelease \
+            -PversionName=${{ github.event.inputs.versionName }} \
+            -PversionCode=${{ github.event.inputs.versionCode }}
+
+      - name: Rename APK and set path
+        id: apk
+        run: |
+          version="${{ github.event.inputs.versionName }}"
+          src_apk=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          dest_apk="app/build/outputs/apk/release/HassTools_v${version}.apk"
+          mv "$src_apk" "$dest_apk"
+          echo "apk_path=$dest_apk" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.event.inputs.versionName }}
+          name: v${{ github.event.inputs.versionName }}
+          draft: ${{ github.event.inputs.draft == 'true' }}
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          body: ${{ github.event.inputs.changelog }}
+          files: |
+            ${{ steps.apk.outputs.apk_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -183,7 +183,7 @@ class EditNetworkActivity : ComponentActivity() {
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
                 Text(
-                    text = "我们通常使用 HTTP 访问 Home Assistant。在连接公共 Wi-Fi 或代理等不可信网络时，通信内容可能被截获。你可以通过自定义网络偏好（如仅使用移动数据）来保护与 Home Assistant 的连接。",
+                    text = "Home Assistant 默认使用 HTTP 协议。在连接公共 Wi-Fi 或代理等不可信网络时，通信内容可能被截获。你可以通过自定义网络偏好（如仅使用移动数据）来保护与 Home Assistant 的连接。",
                     style = MaterialTheme.typography.bodyMedium
                 )
 

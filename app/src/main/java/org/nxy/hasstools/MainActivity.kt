@@ -67,6 +67,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -117,6 +118,8 @@ import org.nxy.hasstools.ui.user.EditUserActivity
 import org.nxy.hasstools.ui.wifigeofence.ManageWifiGeofenceActivity
 import org.nxy.hasstools.utils.Json
 import org.nxy.hasstools.utils.StepCounter
+import org.nxy.hasstools.utils.UpdateCheckResult
+import org.nxy.hasstools.utils.UpdateChecker
 import org.nxy.hasstools.utils.amap.AMap
 import org.nxy.hasstools.utils.checkGroupPermissions
 import org.nxy.hasstools.utils.checkProviderEnabled
@@ -1010,6 +1013,212 @@ class MainActivity : ComponentActivity() {
                         killPowerAlertViewModel.setEnabled(it)
                     },
                 )
+            }
+
+            // 关于部分
+            var showUpdateDialog by remember { mutableStateOf(false) }
+            var isCheckingUpdate by remember { mutableStateOf(false) }
+            var updateResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
+            var isDownloading by remember { mutableStateOf(false) }
+            var downloadProgress by remember { mutableFloatStateOf(0f) }
+
+            SettingsCard("关于") {
+                // 检查更新
+                ButtonSettingsItem(
+                    title = "检查更新",
+                    description = "当前版本：v${UpdateChecker.getCurrentVersionName(context)}",
+                    enabled = !isCheckingUpdate && !isDownloading,
+                    onClick = {
+                        isCheckingUpdate = true
+                        lifecycleScope.launch(IO) {
+                            val result = UpdateChecker.checkForUpdate()
+                            updateResult = result
+                            isCheckingUpdate = false
+                            showUpdateDialog = true
+                        }
+                    }
+                )
+
+                // 开源仓库
+                ButtonSettingsItem(
+                    title = "开源仓库",
+                    onClick = {
+                        UpdateChecker.openRepoPage(context)
+                    }
+                )
+            }
+
+            // 更新检查对话框
+            if (showUpdateDialog) {
+                when (val result = updateResult) {
+                    is UpdateCheckResult.UpdateAvailable -> {
+                        AlertDialog(
+                            onDismissRequest = {
+                                if (!isDownloading) {
+                                    showUpdateDialog = false
+                                }
+                            },
+                            title = { Text("发现新版本") },
+                            text = {
+                                Column(
+                                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "当前版本：${result.currentVersion}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        text = "最新版本：${result.latestVersion}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+
+                                    if (result.releaseNotes.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = "更新说明：",
+                                            style = MaterialTheme.typography.titleSmall
+                                        )
+                                        Text(
+                                            text = result.releaseNotes,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+
+                                    if (isDownloading) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = "下载中：${(downloadProgress * 100).toInt()}%",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        androidx.compose.material3.LinearProgressIndicator(
+                                            progress = { downloadProgress },
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                if (!isDownloading) {
+                                    TextButton(
+                                        onClick = {
+                                            UpdateChecker.openReleasesPage(context)
+                                        }
+                                    ) {
+                                        Text("查看")
+                                    }
+                                    Row {
+                                        if (result.apkAsset != null) {
+                                            TextButton(
+                                                onClick = {
+                                                    isDownloading = true
+                                                    downloadProgress = 0f
+                                                    lifecycleScope.launch(IO) {
+                                                        val downloadResult = UpdateChecker.downloadApk(
+                                                            result.apkAsset
+                                                        ) { downloaded, total ->
+                                                            if (total > 0) {
+                                                                downloadProgress = downloaded.toFloat() / total
+                                                            }
+                                                        }
+                                                        isDownloading = false
+                                                        when (downloadResult) {
+                                                            is UpdateChecker.DownloadResult.Success -> {
+                                                                UpdateChecker.installApk(context, downloadResult.file)
+                                                                showUpdateDialog = false
+                                                            }
+
+                                                            is UpdateChecker.DownloadResult.DigestMismatch -> {
+                                                                runOnUiThread {
+                                                                    Toast.makeText(
+                                                                        context, downloadResult.message,
+                                                                        Toast.LENGTH_LONG
+                                                                    ).show()
+                                                                }
+                                                            }
+
+                                                            is UpdateChecker.DownloadResult.Failed -> {
+                                                                runOnUiThread {
+                                                                    Toast.makeText(
+                                                                        context, downloadResult.message,
+                                                                        Toast.LENGTH_SHORT
+                                                                    ).show()
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            ) {
+                                                Text("下载")
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            dismissButton = {
+                                Row {
+                                    if (!isDownloading) {
+                                        TextButton(
+                                            onClick = { showUpdateDialog = false }
+                                        ) {
+                                            Text("取消")
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                    }
+
+                    is UpdateCheckResult.UpToDate -> {
+                        AlertDialog(
+                            onDismissRequest = { showUpdateDialog = false },
+                            title = { Text("已是最新版本") },
+                            text = {
+                                Text("当前版本 ${result.currentVersion} 已是最新版本。")
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showUpdateDialog = false }) {
+                                    Text("确定")
+                                }
+                            }
+                        )
+                    }
+
+                    is UpdateCheckResult.Error -> {
+                        AlertDialog(
+                            onDismissRequest = { showUpdateDialog = false },
+                            title = { Text("失败") },
+                            text = {
+                                Text(result.message)
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showUpdateDialog = false }) {
+                                    Text("确定")
+                                }
+                            }
+                        )
+                    }
+
+                    null -> {
+                        // 加载中状态
+                        AlertDialog(
+                            onDismissRequest = { },
+                            title = { Text("检查更新") },
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    androidx.compose.material3.CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Text("正在检查更新...")
+                                }
+                            },
+                            confirmButton = { }
+                        )
+                    }
+                }
             }
         }
     }
