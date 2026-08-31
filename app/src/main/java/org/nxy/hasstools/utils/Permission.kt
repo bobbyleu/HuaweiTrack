@@ -151,8 +151,8 @@ class PermissionItem(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.revokeSelfPermissionOnKill(permissionName)
             } else {
-                @Suppress("DEPRECATION")
-                context.revokePermission(permissionName)
+                // Android 12/12L (API 31/32) 无对应的运行时撤销 API，提示用户到系统设置手动撤销
+                Toast.makeText(context, "此权限不支持自动撤销授权", Toast.LENGTH_SHORT).show()
             }
         }
     )
