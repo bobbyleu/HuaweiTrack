@@ -8,14 +8,13 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.net.toUri
-import androidx.health.connect.client.permission.HealthPermission
-import androidx.health.connect.client.records.StepsRecord
 import org.nxy.hasstools.services.NotificationListenerService
 
 /**
@@ -148,7 +147,14 @@ class PermissionItem(
                 0
             )
         },
-        permissionRevokedFunction = { context -> context.revokeSelfPermissionOnKill(permissionName) }
+        permissionRevokedFunction = { context ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.revokeSelfPermissionOnKill(permissionName)
+            } else {
+                @Suppress("DEPRECATION")
+                context.revokePermission(permissionName)
+            }
+        }
     )
 }
 
@@ -167,40 +173,6 @@ val locationPermissionGroup = listOf(
         permissionLabel = "发送通知",
         permissionDesc = "注册前台服务可以提升进程优先级，降低应用被系统优化的可能性。",
         permissionName = Manifest.permission.POST_NOTIFICATIONS
-    ),
-    PermissionItem(
-        permissionLabel = "电池优化",
-        permissionDesc = "允许应用在后台运行。",
-        permissionCheckFunction = {
-            checkBatteryOptimization(context = it)
-        },
-        permissionRequestFunction = {
-            requestBatteryOptimization(context = it)
-        }
-    ),
-    PermissionItem(
-        permissionLabel = "精准闹钟",
-        permissionDesc = "用于创建精确的定时任务。",
-        permissionCheckFunction = {
-            checkExactAlarmPermission(context = it)
-        },
-        permissionRequestFunction = {
-            requestExactAlarmPermission(context = it)
-        }
-    )
-)
-
-/** 步数推送相关权限组 */
-val stepPushPermissionGroup = listOf(
-    PermissionItem(
-        permissionLabel = "运动健康",
-        permissionDesc = "用于获取步数传感器的实时数据。",
-        permissionName = Manifest.permission.ACTIVITY_RECOGNITION
-    ),
-    PermissionItem(
-        permissionLabel = "步数（写入）",
-        permissionDesc = "用于将步数数据推送到 Health Connect。",
-        permissionName = HealthPermission.getWritePermission(StepsRecord::class)
     ),
     PermissionItem(
         permissionLabel = "电池优化",

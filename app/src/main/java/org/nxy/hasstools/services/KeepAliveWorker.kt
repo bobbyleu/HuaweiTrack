@@ -28,11 +28,9 @@ import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.launch
 import org.nxy.hasstools.R
 import org.nxy.hasstools.data.LocationDataStore
-import org.nxy.hasstools.data.StepPushDataStore
 import org.nxy.hasstools.data.UserDataStore
 import org.nxy.hasstools.data.WifiGeofenceDataStore
 import org.nxy.hasstools.objects.WifiGeofence
-import org.nxy.hasstools.startStepWork
 import org.nxy.hasstools.utils.LocationHandler
 
 private object KeepAliveWorker {
@@ -351,12 +349,6 @@ class KeepAliveForegroundService : Service() {
             print("KeepAliveForegroundService 重启")
 
             startLocationWork(applicationContext, userConfig)
-
-            val stepPushConfig = StepPushDataStore().readData()
-
-            if (stepPushConfig.enabled) {
-                startStepWork(applicationContext)
-            }
         }
 
         // 广播启动

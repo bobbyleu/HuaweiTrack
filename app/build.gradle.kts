@@ -20,7 +20,7 @@ android {
 
     defaultConfig {
         applicationId = "org.nxy.hasstools"
-        minSdk = 33
+        minSdk = 31
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
@@ -98,7 +98,6 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.connect.client)
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.okhttp)

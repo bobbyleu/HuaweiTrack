@@ -85,7 +85,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
-import androidx.health.connect.client.HealthConnectClient
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers.IO
@@ -94,7 +93,6 @@ import org.nxy.hasstools.objects.AmapViewModel
 import org.nxy.hasstools.objects.FusedProvider
 import org.nxy.hasstools.objects.KillPowerAlertViewModel
 import org.nxy.hasstools.objects.LocationViewModel
-import org.nxy.hasstools.objects.StepPushViewModel
 import org.nxy.hasstools.objects.User
 import org.nxy.hasstools.objects.UserViewModel
 import org.nxy.hasstools.services.LOCATION_WORKING_STATUS_ACTION
@@ -111,13 +109,11 @@ import org.nxy.hasstools.ui.location.EditAmapKeyActivity
 import org.nxy.hasstools.ui.network.EditNetworkActivity
 import org.nxy.hasstools.ui.permission.KillPowerAlertGrantPermissionActivity
 import org.nxy.hasstools.ui.permission.LocationGrantPermissionActivity
-import org.nxy.hasstools.ui.permission.StepPushGrantPermissionActivity
 import org.nxy.hasstools.ui.theme.AppTheme
 import org.nxy.hasstools.ui.user.CreateUserActivity
 import org.nxy.hasstools.ui.user.EditUserActivity
 import org.nxy.hasstools.ui.wifigeofence.ManageWifiGeofenceActivity
 import org.nxy.hasstools.utils.Json
-import org.nxy.hasstools.utils.StepCounter
 import org.nxy.hasstools.utils.UpdateCheckResult
 import org.nxy.hasstools.utils.UpdateChecker
 import org.nxy.hasstools.utils.amap.AMap
@@ -125,7 +121,6 @@ import org.nxy.hasstools.utils.checkGroupPermissions
 import org.nxy.hasstools.utils.checkProviderEnabled
 import org.nxy.hasstools.utils.killPowerAlertPermissionGroup
 import org.nxy.hasstools.utils.locationPermissionGroup
-import org.nxy.hasstools.utils.stepPushPermissionGroup
 import java.net.URL
 
 internal class MainActivityViewModel : ViewModel() {
@@ -138,8 +133,6 @@ internal class MainActivityViewModel : ViewModel() {
     val fusedProvider = mutableStateOf(FusedProvider.NONE)
 
     val users = mutableStateListOf<User>()
-
-    val stepPushEnabled = mutableStateOf(false)
 
     val killPowerAlertEnabled = mutableStateOf(false)
 
@@ -165,8 +158,6 @@ class MainActivity : ComponentActivity() {
     private val amapViewModel: AmapViewModel by viewModels()
 
     private val userViewModel: UserViewModel by viewModels()
-
-    private val stepPushViewModel: StepPushViewModel by viewModels()
 
     private val killPowerAlertViewModel: KillPowerAlertViewModel by viewModels()
 
@@ -264,11 +255,6 @@ class MainActivity : ComponentActivity() {
         userViewModel.userConfig.value.apply {
             viewModel.users.clear()
             viewModel.users.addAll(items)
-        }
-
-        stepPushViewModel.stepPushConfig.value.apply {
-            val allPermissionGranted = checkGroupPermissions(this@MainActivity, stepPushPermissionGroup)
-            viewModel.stepPushEnabled.value = enabled && allPermissionGranted
         }
 
         killPowerAlertViewModel.killPowerAlertConfig.value.apply {
@@ -957,37 +943,6 @@ class MainActivity : ComponentActivity() {
             }
 
             SettingsCard("杂项") {
-                SwitchSettingsItem(
-                    title = "步数推送",
-                    description = "将步数信息推送到 Health Connect。",
-                    checked = viewModel.stepPushEnabled.value,
-                    enabled = StepCounter.isSupported(this@MainActivity) &&
-                            HealthConnectClient.getSdkStatus(context) == HealthConnectClient.SDK_AVAILABLE,
-                    onCheckedChange = {
-                        if (it) {
-                            val allPermissionGranted = checkGroupPermissions(this@MainActivity, stepPushPermissionGroup)
-
-                            if (!allPermissionGranted) {
-                                // 进入StepGrantPermissionActivity
-                                startActivity(Intent(this@MainActivity, StepPushGrantPermissionActivity::class.java))
-                                return@SwitchSettingsItem
-                            }
-
-                            viewModel.stepPushEnabled.value = true
-                            stepPushViewModel.setEnabled(true)
-
-                            // 启动服务
-                            startStepWork(context)
-                        } else {
-                            viewModel.stepPushEnabled.value = false
-                            stepPushViewModel.setEnabled(false)
-
-                            // 停止服务
-                            stopStepWork(context)
-                        }
-                    }
-                )
-
                 SwitchSettingsItem(
                     title = "移除高耗电通知",
                     description = "自动移除 Home Assistant 应用和位置上报的耗电通知。该功能仅在荣耀 MagicOS 设备上生效。",
