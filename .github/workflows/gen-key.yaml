@@ -1,0 +1,57 @@
+name: Generate Signing Key (one-time, no local software needed)
+
+# 用途：本机不装任何软件，在 GitHub 云端生成 Android 签名密钥。
+# 触发：push 到仓库后，到 Actions 页手动触发本工作流（Run workflow）。
+# 产物：日志中会打印一行 base64，同时也会作为 artifact 供下载。
+# 注意：密钥只生成一次，下载后妥善保存；之后改 versionName 再 push 才会出 6MB 压缩包。
+
+on:
+  workflow_dispatch:
+    inputs:
+      store_password:
+        description: 'Keystore (store) password —— 记下来，填 Secrets 要用'
+        required: true
+        default: 'huaweitrack123'
+      key_password:
+        description: 'Key (alias) password —— 记下来，填 Secrets 要用'
+        required: true
+        default: 'huaweitrack123'
+      key_alias:
+        description: 'Key alias'
+        required: true
+        default: 'huaweitrack'
+
+jobs:
+  gen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 17 (云端自带，无需本机安装)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Generate keystore with keytool
+        env:
+          STORE_PASS: ${{ github.event.inputs.store_password }}
+          KEY_PASS: ${{ github.event.inputs.key_password }}
+          KEY_ALIAS: ${{ github.event.inputs.key_alias }}
+        run: |
+          keytool -genkey -v \
+            -keystore huaweitrack.keystore \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias "$KEY_ALIAS" \
+            -storepass "$STORE_PASS" -keypass "$KEY_PASS" \
+            -dname "CN=HuaweiTrack"
+          # 单行 base64（不换行），方便整段粘进 GitHub Secret
+          base64 -w0 huaweitrack.keystore > huaweitrack.b64
+          echo "--------- 复制下面这一整行（无换行）---------"
+          cat huaweitrack.b64
+          echo ""
+          echo "------------------------------------------------"
+
+      - name: Upload as artifact (也可到 Actions 页下载 huaweitrack.b64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: huaweitrack-keystore-b64
+          path: huaweitrack.b64
