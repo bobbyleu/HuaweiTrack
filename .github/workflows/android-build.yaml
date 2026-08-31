@@ -35,9 +35,22 @@ jobs:
           echo "tag=v$VER" >> "$GITHUB_OUTPUT"
           echo "App version: $VER"
 
+      - name: Check if signing key is configured
+        id: check_key
+        env:
+          KEY_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEY_B64" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Decode keystore (only if secret configured)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore
+        if: steps.check_key.outputs.has_key == 'true'
+        env:
+          KEY_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$KEY_B64" | base64 -d > app/release.keystore
 
       - name: Build APK
         env:
