@@ -68,6 +68,11 @@ android {
             it.jvmArgs("-XX:+EnableDynamicAgentLoading")
         }
     }
+    // 不上架 Google Play（走 GitHub Release），关闭其 targetSdk≥33 的强制 lint 检查；
+    // 鸿蒙 4.x 兼容层要求 targetSdk≤32，二者冲突，此处以鸿蒙安装为准。
+    lint {
+        disable += "ExpiredTargetSdkVersion"
+    }
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
