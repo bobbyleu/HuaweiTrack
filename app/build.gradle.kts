@@ -21,9 +21,10 @@ android {
     defaultConfig {
         applicationId = "org.nxy.hasstools"
         minSdk = 31
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // 鸿蒙 4.x 安卓兼容层基于 Android 12(API 32)，实测 targetSdk ≥ 33 会被拒绝安装(解析包错误)
+        targetSdk = 31
+        versionCode = 2
+        versionName = "1.0.1"
 
         val ciVersionCode = project.findProperty("versionCode") as String?
         val ciVersionName = project.findProperty("versionName") as String?
@@ -54,6 +55,11 @@ android {
             storePassword = keystorePassword
             this.keyAlias = keyAlias
             this.keyPassword = keyPassword
+
+            // 鸿蒙要求 v3 签名，显式开启最稳妥
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 
