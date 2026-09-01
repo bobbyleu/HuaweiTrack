@@ -67,21 +67,6 @@ jobs:
             ./gradlew assembleDebug
           fi
 
-      - name: Set up Android SDK (for aapt/apksigner)
-        uses: android-actions/setup-android@v3
-
-      - name: Verify APK metadata
-        run: |
-          echo "Installing build-tools (for aapt / apksigner)..."
-          sdkmanager "build-tools;34.0.0" >/dev/null 2>&1 || true
-          export PATH=$ANDROID_HOME/build-tools/34.0.0:$PATH
-          APK=$(find app/build/outputs/apk -name '*.apk' | head -n 1)
-          echo "=== APK: $APK ==="
-          echo "--- signing schemes (expect V1 / V2 / V3) ---"
-          apksigner verify --verbose "$APK" | grep -E "Verifies|Scheme" || true
-          echo "--- package / minSdk / targetSdk / ABI ---"
-          aapt dump badging "$APK" | grep -E "package:|sdkVersion|targetSdkVersion|native-code" || true
-
       - name: Rename APK to huaweitrack.apk
         id: rename
         run: |
