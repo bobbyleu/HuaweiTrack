@@ -3,7 +3,7 @@ package org.nxy.hasstools.utils
 /**
  * 内置的 Let's Encrypt 公共根证书（PEM）。
  *
- * 背景：Let's Encrypt 于 2025-09 启用新一代层级（EE ← YE*/YR* ← Root YE/YR ← X2/X1），
+ * 背景：Let's Encrypt 于 2025-09 启用新一代层级（EE ← YE 系列/YR 系列 ← Root YE/YR ← X2/X1），
  * 其中 Root YE / Root YR 尚未进入各厂商（尤其华为鸿蒙兼容层）的系统信任库，
  * 部分设备的 Conscrypt 也无法通过交叉链锚定到已有的 ISRG Root X1/X2，
  * 导致访问由 LE 签发证书的服务（如 Cloudflare 隧道）时报
