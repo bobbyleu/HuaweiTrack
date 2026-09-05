@@ -23,8 +23,8 @@ android {
         minSdk = 31
         // 鸿蒙 4.x 安卓兼容层基于 Android 12(API 32)，实测 targetSdk ≥ 33 会被拒绝安装(解析包错误)
         targetSdk = 31
-        versionCode = 8
-        versionName = "1.0.7"
+        versionCode = 9
+        versionName = "1.0.8"
 
         val ciVersionCode = project.findProperty("versionCode") as String?
         val ciVersionName = project.findProperty("versionName") as String?
@@ -114,6 +114,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.reorderable)
     implementation(libs.amapLocation)
+    // 完整版 BouncyCastle：系统 stripped 版 BC 读不了新版 OpenSSL 生成的 PKCS12
+    implementation(libs.bouncycastle)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

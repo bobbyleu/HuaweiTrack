@@ -26,3 +26,7 @@
 -keep class com.amap.api.location.**{*;}
 -keep class com.loc.**{*;}
 -keep class com.autonavi.aps.amapapi.model.**{*;}
+
+# BouncyCastle（PKCS12 读取）：混淆会破坏 Provider 反射注册与算法查找
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**

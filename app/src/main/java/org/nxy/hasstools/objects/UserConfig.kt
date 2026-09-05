@@ -27,6 +27,8 @@ data class User(
     val clientCertEnabled: Boolean = false,
     val clientCertPath: String = "",
     val clientCertPassword: String = "",
+    // 额外信任的服务端 CA 证书（PEM/DER；自建隧道服务端证书不被系统信任时使用）
+    val serverCaPath: String = "",
 ) {
     companion object {
         const val REGISTER_USER_TYPE = "register"

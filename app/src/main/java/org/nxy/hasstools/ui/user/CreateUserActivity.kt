@@ -109,6 +109,10 @@ internal class CreateUserViewModel : ViewModel() {
     val clientCertPassword = mutableStateOf("")
     val clientCertFileName = mutableStateOf("")
 
+    // 服务端 CA 证书（自定义信任）
+    val serverCaPath = mutableStateOf("")
+    val serverCaFileName = mutableStateOf("")
+
     val userName = mutableStateOf("")
 
     val step = mutableIntStateOf(0)
@@ -170,7 +174,7 @@ class CreateUserActivity : ComponentActivity() {
 
         val certPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@registerForActivityResult
-            val path = copyCertToPrivateStorage(uri, viewModel.tempUserId.value)
+            val path = copyCertToPrivateStorage(uri, viewModel.tempUserId.value, "p12")
             if (path != null) {
                 val old = viewModel.clientCertPath.value
                 if (old.isNotEmpty() && old != path) File(old).delete()
@@ -181,8 +185,21 @@ class CreateUserActivity : ComponentActivity() {
             }
         }
 
+        val caPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            val path = copyCertToPrivateStorage(uri, viewModel.tempUserId.value, "ca")
+            if (path != null) {
+                val old = viewModel.serverCaPath.value
+                if (old.isNotEmpty() && old != path) File(old).delete()
+                viewModel.serverCaPath.value = path
+                viewModel.serverCaFileName.value = File(path).name
+            } else {
+                Toast.makeText(this, "无法读取所选 CA 证书文件", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         setContent {
-            CreateUserUI(viewModel, certPickerLauncher)
+            CreateUserUI(viewModel, certPickerLauncher, caPickerLauncher)
         }
 
         // 返回键检查
@@ -273,7 +290,8 @@ class CreateUserActivity : ComponentActivity() {
     @Composable
     private fun CreateUserUI(
         viewModel: CreateUserViewModel,
-        certPickerLauncher: ActivityResultLauncher<Array<String>>
+        certPickerLauncher: ActivityResultLauncher<Array<String>>,
+        caPickerLauncher: ActivityResultLauncher<Array<String>>
     ) {
         val step = viewModel.step
 
@@ -586,7 +604,8 @@ class CreateUserActivity : ComponentActivity() {
                                                 deviceId = deviceId.value.trim(),
                                                 deviceName = deviceName.value.trim(),
                                                 clientCertPath = if (viewModel.clientCertEnabled.value) viewModel.clientCertPath.value else "",
-                                                clientCertPassword = if (viewModel.clientCertEnabled.value) viewModel.clientCertPassword.value else ""
+                                                clientCertPassword = if (viewModel.clientCertEnabled.value) viewModel.clientCertPassword.value else "",
+                                                serverCaPath = viewModel.serverCaPath.value
                                             )
 
                                             val newWebhookId = hassClient.registerDevice(this@CreateUserActivity)
@@ -698,7 +717,7 @@ class CreateUserActivity : ComponentActivity() {
                         }
                     }
 
-                ClientCertCard(viewModel, certPickerLauncher)
+                ClientCertCard(viewModel, certPickerLauncher, caPickerLauncher)
 
                 }
             }
@@ -1072,10 +1091,11 @@ class CreateUserActivity : ComponentActivity() {
     @Composable
     private fun ClientCertCard(
         viewModel: CreateUserViewModel,
-        launcher: ActivityResultLauncher<Array<String>>
+        launcher: ActivityResultLauncher<Array<String>>,
+        caLauncher: ActivityResultLauncher<Array<String>>
     ) {
         TitleCard(
-            title = "客户端证书（mTLS，可选）"
+            title = "客户端证书 / 服务端 CA（可选）"
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1120,11 +1140,33 @@ class CreateUserActivity : ComponentActivity() {
                     )
 
                     Text(
-                        text = "将 .p12 客户端证书（含私钥）拷贝到本应用私有目录，用于向要求客户端证书的 Home Assistant 隧道（如 Cloudflare Access mTLS）出示身份。服务端证书仍由系统默认信任库验证。",
+                        text = "将 .p12 客户端证书（含私钥）拷贝到本应用私有目录，用于向要求客户端证书的隧道出示身份。",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
+
+            // 服务端 CA：独立于客户端证书开关，仅自定义信任时需要
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 12.dp)
+            ) {
+                Button(onClick = { caLauncher.launch(arrayOf("*/*")) }) {
+                    Text("服务端 CA 证书")
+                }
+                Text(
+                    text = if (viewModel.serverCaFileName.value.isNotEmpty()) viewModel.serverCaFileName.value else "未选择",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Text(
+                text = "隧道服务端证书不被系统信任（自建 CA/自签名）时，在此上传签发该证书的 CA（PEM/DER）。不传则仅使用系统默认信任库。",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp)
+            )
         }
     }
 
@@ -1152,19 +1194,20 @@ class CreateUserActivity : ComponentActivity() {
                     deviceName = deviceName,
                     webhookId = webhookId,
                     clientCertEnabled = viewModel.clientCertEnabled.value,
-                    clientCertPath = viewModel.clientCertPath.value,
-                    clientCertPassword = viewModel.clientCertPassword.value,
+                    clientCertPath = if (viewModel.clientCertEnabled.value) viewModel.clientCertPath.value else "",
+                    clientCertPassword = if (viewModel.clientCertEnabled.value) viewModel.clientCertPassword.value else "",
+                    serverCaPath = viewModel.serverCaPath.value,
                 )
             )
         )
         setResult(RESULT_OK, intent)
     }
 
-    private fun copyCertToPrivateStorage(uri: Uri, userId: String): String? {
+    private fun copyCertToPrivateStorage(uri: Uri, userId: String, suffix: String): String? {
         return try {
             val dir = File(filesDir, "certs")
             if (!dir.exists()) dir.mkdirs()
-            val dest = File(dir, "user_$userId.p12")
+            val dest = File(dir, "user_$userId.$suffix")
             contentResolver.openInputStream(uri)?.use { input ->
                 dest.outputStream().use { output -> input.copyTo(output) }
             }

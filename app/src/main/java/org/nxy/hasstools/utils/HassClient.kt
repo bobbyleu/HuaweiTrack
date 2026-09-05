@@ -29,21 +29,23 @@ class HassClient(
     private var deviceName: String? = null,
     private var webhookId: String? = null,
     private var clientCertPath: String? = null,
-    private var clientCertPassword: String? = null
+    private var clientCertPassword: String? = null,
+    private var serverCaPath: String? = null
 ) {
     private var cachedZones: List<Zone>? = null
 
-    // mTLS 客户端证书（惰性加载，避免每次请求重复读取 p12）
+    // mTLS 客户端证书 / 自定义 CA（惰性加载，避免每次请求重复读取文件）
     private var clientCertInfo: ClientCertInfo? = null
     private var clientCertResolved = false
 
     private fun resolveClientCert(): ClientCertInfo? {
         if (clientCertResolved) return clientCertInfo
         clientCertResolved = true
-        val path = clientCertPath
-        val password = clientCertPassword
-        if (!path.isNullOrEmpty() && !password.isNullOrEmpty()) {
-            clientCertInfo = ClientCertHelper.build(path, password)
+        val p12 = clientCertPath.orEmpty()
+        val password = clientCertPassword.orEmpty()
+        val ca = serverCaPath.orEmpty()
+        if (p12.isNotEmpty() || ca.isNotEmpty()) {
+            clientCertInfo = ClientCertHelper.build(p12, password, ca)
         }
         return clientCertInfo
     }

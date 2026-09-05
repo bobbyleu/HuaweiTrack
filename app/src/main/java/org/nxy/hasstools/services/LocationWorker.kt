@@ -177,7 +177,8 @@ fun startLocationWork(context: Context, userConfig: UserConfig): Boolean {
                     baseUrl = it.url,
                     webhookId = it.webhookId,
                     clientCertPath = if (it.clientCertEnabled) it.clientCertPath else "",
-                    clientCertPassword = if (it.clientCertEnabled) it.clientCertPassword else ""
+                    clientCertPassword = if (it.clientCertEnabled) it.clientCertPassword else "",
+                    serverCaPath = it.serverCaPath
                 )
             )
         }
