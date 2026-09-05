@@ -485,7 +485,7 @@ object LocationHandler {
         val scanResults = wifiManager.scanResults
 
         val leaveProtectionWifiExists = scanResults.any {
-            val ssid = it.wifiSsid.toString().removeSurrounding("\"")
+            val ssid = it.safeSsid()
             val bssid = it.BSSID
             println("扫描到的 Wi-Fi：$ssid $bssid, ${targetSsidList.contains(ssid)} ${targetBssidList.contains(bssid)}")
 

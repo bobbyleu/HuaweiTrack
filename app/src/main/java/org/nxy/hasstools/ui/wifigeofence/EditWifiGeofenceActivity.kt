@@ -89,6 +89,7 @@ import org.nxy.hasstools.ui.components.IconDialog
 import org.nxy.hasstools.ui.components.TitleCard
 import org.nxy.hasstools.ui.theme.AppTheme
 import org.nxy.hasstools.utils.Json
+import org.nxy.hasstools.utils.safeSsid
 
 internal class EditWifiGeofenceViewModel : ViewModel() {
     val geofenceId = mutableStateOf("")
@@ -750,11 +751,11 @@ class EditWifiGeofenceActivity : ComponentActivity() {
             FilledTonalButton(
                 onClick = {
                     val rawWifiList =
-                        scanWifi(getSystemService(WifiManager::class.java)).filter { it.wifiSsid.toString() != "" }
+                        scanWifi(getSystemService(WifiManager::class.java)).filter { it.safeSsid().isNotEmpty() }
                             .sortedByDescending { it.level }
 
                     groupedWifiList = rawWifiList.groupBy {
-                        it.wifiSsid.toString().removeSurrounding("\"")
+                        it.safeSsid()
                     }
                     showDialog = true
                 }, modifier = Modifier.fillMaxWidth()
@@ -769,11 +770,11 @@ class EditWifiGeofenceActivity : ComponentActivity() {
                 onDismiss = { showDialog = false },
                 onRefresh = {
                     val rawWifiList =
-                        scanWifi(getSystemService(WifiManager::class.java)).filter { it.wifiSsid.toString() != "" }
+                        scanWifi(getSystemService(WifiManager::class.java)).filter { it.safeSsid().isNotEmpty() }
                             .sortedByDescending { it.level }
 
                     groupedWifiList = rawWifiList.groupBy {
-                        it.wifiSsid.toString().removeSurrounding("\"")
+                        it.safeSsid()
                     }
                 },
                 onWifiSelected = { ssid, scanResults ->
@@ -829,7 +830,7 @@ class EditWifiGeofenceActivity : ComponentActivity() {
                 onWifiSelected = { result ->
                     onWifiSelected(
                         WifiGeofenceWifiInfo(
-                            result.wifiSsid.toString().removeSurrounding("\""), result.BSSID
+                            result.safeSsid(), result.BSSID
                         )
                     )
                     showDialog = false
@@ -1006,9 +1007,11 @@ class EditWifiGeofenceActivity : ComponentActivity() {
                 ).show()
             }
             results
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "Wi-Fi 扫描失败：${e.message}", Toast.LENGTH_LONG).show()
+        } catch (t: Throwable) {
+            // 同样必须捕获 Throwable 而非 Exception：
+            // 调用高于设备系统版本的 API 会抛 NoSuchMethodError（Error，catch(Exception) 抓不到）
+            t.printStackTrace()
+            Toast.makeText(this, "Wi-Fi 扫描失败：${t.message}", Toast.LENGTH_LONG).show()
             emptyList()
         }
     }
@@ -1252,7 +1255,7 @@ class EditWifiGeofenceActivity : ComponentActivity() {
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text(
-                                    result.wifiSsid.toString().removeSurrounding("\""),
+                                    result.safeSsid(),
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )

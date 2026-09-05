@@ -33,6 +33,7 @@ import org.nxy.hasstools.data.UserDataStore
 import org.nxy.hasstools.data.WifiGeofenceDataStore
 import org.nxy.hasstools.objects.WifiGeofence
 import org.nxy.hasstools.utils.LocationHandler
+import org.nxy.hasstools.utils.safeSsid
 
 private object KeepAliveWorker {
     lateinit var serviceIntent: Intent
@@ -111,6 +112,19 @@ class KeepAliveForegroundService : Service() {
         }
 
         override fun onScanResultsAvailable() {
+            // 必须捕获 Throwable 而非 Exception：
+            // 调用了高于设备系统版本的 API（例如 ScanResult.getWifiSsid() 自 Android 13 才引入）
+            // 会抛出 NoSuchMethodError，它属于 Error，catch (Exception) 根本捕获不到。
+            // 本回调运行在前台服务内，异常一旦逃逸会令服务崩溃并被 START_STICKY 反复拉起，
+            // 即系统提示的"位置上报屡次停止运行"。
+            try {
+                handleScanResults()
+            } catch (t: Throwable) {
+                LogInterceptor.e("KeepAlive", "处理 Wi-Fi 扫描结果失败：${t.stackTraceToString()}")
+            }
+        }
+
+        private fun handleScanResults() {
             if (ActivityCompat.checkSelfPermission(
                     this@KeepAliveForegroundService,
                     Manifest.permission.ACCESS_FINE_LOCATION
@@ -144,7 +158,7 @@ class KeepAliveForegroundService : Service() {
                     if (geofence.effectUserIds.isNotEmpty() && !geofence.effectUserIds.contains(userId)) continue
 
                     val anyMatch = results.any { result ->
-                        val ssid = result.wifiSsid?.toString()?.removeSurrounding("\"") ?: ""
+                        val ssid = result.safeSsid()
                         val bssid = result.BSSID ?: ""
                         ssidSet.contains(ssid) || bssidSet.contains(bssid)
                     }
