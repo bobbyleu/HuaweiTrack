@@ -356,7 +356,9 @@ class GetLocationManuallyForegroundService : Service() {
          */
         fun run(context: Context) {
             val serviceIntent = Intent(context, GetLocationManuallyForegroundService::class.java)
-            context.startService(serviceIntent)
+            // Android 12(API 31)+ 要求用 startForegroundService 启动会变前台的服务，
+            // 否则抛 ForegroundServiceStartNotAllowedException 导致“位置上报屡次停止运行”
+            context.startForegroundService(serviceIntent)
         }
     }
 }
@@ -535,7 +537,9 @@ class GetLocationPlannedForegroundService : Service() {
 
             val serviceIntent = Intent(context, GetLocationPlannedForegroundService::class.java)
 
-            context.startService(serviceIntent)
+            // Android 12(API 31)+ 要求用 startForegroundService 启动会变前台的服务，
+            // 否则抛 ForegroundServiceStartNotAllowedException 导致“位置上报屡次停止运行”
+            context.startForegroundService(serviceIntent)
 
             return null
         }
