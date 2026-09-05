@@ -56,6 +56,11 @@ private class CompositeTrustManager(private val delegates: List<X509TrustManager
                 lastError = e
             }
         }
+        // 全部信任管理器都拒绝时，打印服务端证书链概要，便于定位"该上传哪个 CA"
+        println(
+            "CompositeTrustManager: 服务端证书链被所有信任源拒绝（${delegates.size} 个信任源）。" +
+                "证书链: " + chain.joinToString(" -> ") { it.subjectX500Principal.name }
+        )
         throw lastError ?: CertificateException("No trust manager accepted the chain")
     }
 
@@ -74,13 +79,30 @@ private class CompositeTrustManager(private val delegates: List<X509TrustManager
  *    不支持新版 OpenSSL（3.x）默认的 AES-256-CBC + SHA-256 MAC 加密算法，
  *    直接用 KeyStore.getInstance("PKCS12") 会抛
  *    "error constructing MAC: No installed provider supports this key: PKCS12Key"。
- * 2. 信任链 = 系统默认信任库 + p12 内含的 CA 证书 + 单独指定的服务端 CA 文件（PEM/DER），
- *    任一通过即可，解决自建隧道服务端证书 "Trust anchor for certification path not found"。
+ * 2. 信任链 = 系统默认信任库 + 内置公共根证书（Let's Encrypt X1/X2/YE/YR，
+ *    见 [BundledCaCerts]）+ p12 内含的 CA 证书 + 单独指定的服务端 CA 文件（PEM/DER），
+ *    任一通过即可，解决自建隧道服务端证书或新 CA 层级
+ *    "Trust anchor for certification path not found"。
  */
 object ClientCertHelper {
 
     // 完整版 BouncyCastle Provider 实例（不全局注册，避免与系统 stripped 版命名冲突）
     private val bcProvider = BouncyCastleProvider()
+
+    // 内置公共根证书（Let's Encrypt X1/X2 + 新 YE/YR 层级），惰性解析一次
+    private val bundledCas: List<X509Certificate> by lazy {
+        try {
+            val cf = CertificateFactory.getInstance("X.509")
+            BundledCaCerts.PEM_LIST.flatMap { pem ->
+                cf.generateCertificates(pem.byteInputStream()).filterIsInstance<X509Certificate>()
+            }.also {
+                println("ClientCertHelper: 已加载内置公共根证书 ${it.size} 张（Let's Encrypt X1/X2/YE/YR）")
+            }
+        } catch (e: Throwable) {
+            println("ClientCertHelper: 解析内置根证书失败（忽略，仅使用系统信任库）: ${e.message}")
+            emptyList()
+        }
+    }
 
     /**
      * 构建携带客户端证书的 TLS 材料。
@@ -128,8 +150,9 @@ object ClientCertHelper {
                 }
             }
 
-            // 3) 构造信任管理器：系统默认 + 额外 CA（去重）
-            val trustManager = buildTrustManager(extraCas.distinctBy { it.subjectX500Principal.name })
+            // 3) 构造信任管理器：系统默认 + 内置公共根证书 + 额外 CA（按主题去重）
+            val allCas = (extraCas + bundledCas).distinctBy { it.subjectX500Principal.name }
+            val trustManager = buildTrustManager(allCas)
 
             // 4) 组装 SSLContext
             val sslContext = SSLContext.getInstance("TLS")
