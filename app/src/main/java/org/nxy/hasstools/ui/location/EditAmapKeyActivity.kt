@@ -56,8 +56,15 @@ object ApkInfo {
             App.context.packageName,
             PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong())
         )
-        val signingInfo = packageInfo.signingInfo
-        val signature = signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray() ?: return@runCatching null
+        // 优先用 signingInfo（Android 9+）；部分安装方式/系统下其为 null，降级用已废弃的 signatures
+        @Suppress("DEPRECATION")
+        val legacySignatures = packageInfo.signatures
+        val signatureBytes = packageInfo.signingInfo
+            ?.apkContentsSigners
+            ?.firstOrNull()
+            ?.toByteArray()
+            ?: legacySignatures?.firstOrNull()?.toByteArray()
+        val signature = signatureBytes ?: return@runCatching null
         val digest = MessageDigest.getInstance("SHA1").digest(signature)
         digest.joinToString(":") { byte -> "%02X".format(byte) }
     }.getOrNull()

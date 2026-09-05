@@ -3,9 +3,11 @@ package org.nxy.hasstools.ui.wifigeofence
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
@@ -981,7 +983,19 @@ class EditWifiGeofenceActivity : ComponentActivity() {
         ) {
             return emptyList()
         }
-        return wifiManager.scanResults
+        // 系统定位未开启或后台位置受限时，getScanResults 在部分 ROM（如华为）会抛 SecurityException，导致闪退
+        val locationManager = getSystemService(LocationManager::class.java)
+        if (locationManager != null && !locationManager.isLocationEnabled) {
+            Toast.makeText(this, "请先在系统设置中开启定位服务", Toast.LENGTH_SHORT).show()
+            return emptyList()
+        }
+        return try {
+            wifiManager.scanResults
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Wi-Fi 扫描失败：${e.message}", Toast.LENGTH_SHORT).show()
+            emptyList()
+        }
     }
 
     @Preview(showBackground = true)
