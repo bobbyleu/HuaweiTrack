@@ -43,6 +43,9 @@ import org.nxy.hasstools.ui.components.TextSettingsItem
 import org.nxy.hasstools.ui.location.ApkInfo.packageName
 import org.nxy.hasstools.ui.theme.AppTheme
 import java.security.MessageDigest
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
+import java.util.zip.ZipFile
 
 internal class EditAmapKeyViewModel : ViewModel() {
     val runtimeApiKey = mutableStateOf("")
@@ -52,19 +55,46 @@ object ApkInfo {
     val packageName: String = App.context.packageName
 
     val signingSha1: String? = runCatching {
+        // 优先直接从 APK 内的 META-INF 证书文件读取（绕过 PackageManager）。
+        // 华为/EMUI 等 ROM 常把 signingInfo 隐藏，导致 PackageManager 取不到签名，
+        // 而本工程开启 v1 签名，META-INF/*.RSA 证书文件必然存在，此法最可靠。
+        getSha1FromApk() ?: getSha1FromPackageManager()
+    }.getOrNull()
+
+    private fun getSha1FromApk(): String? = runCatching {
+        val pm = App.context.packageManager
+        val sourceDir = pm.getApplicationInfo(App.context.packageName, 0).sourceDir
+        val zip = ZipFile(sourceDir)
+        val entry = zip.entries().asSequence().firstOrNull { e ->
+            val n = e.name.uppercase()
+            n.startsWith("META-INF/") && (n.endsWith(".RSA") || n.endsWith(".DSA") || n.endsWith(".EC"))
+        } ?: return@runCatching null
+        zip.getInputStream(entry).use { input ->
+            val cert = CertificateFactory
+                .getInstance("X.509")
+                .generateCertificate(input) as X509Certificate
+            val digest = MessageDigest.getInstance("SHA1").digest(cert.encoded)
+            digest.joinToString(":") { byte -> "%02X".format(byte) }
+        }
+    }.getOrNull()
+
+    private fun getSha1FromPackageManager(): String? = runCatching {
         val packageInfo = App.context.packageManager.getPackageInfo(
             App.context.packageName,
             PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong())
         )
-        // 优先用 signingInfo（Android 9+）；部分安装方式/系统下其为 null，降级用已废弃的 signatures
-        @Suppress("DEPRECATION")
-        val legacySignatures = packageInfo.signatures
-        val signatureBytes = packageInfo.signingInfo
+        val signature = packageInfo.signingInfo
             ?.apkContentsSigners
             ?.firstOrNull()
             ?.toByteArray()
-            ?: legacySignatures?.firstOrNull()?.toByteArray()
-        val signature = signatureBytes ?: return@runCatching null
+            ?: packageInfo.signingInfo
+                ?.signingCertificateHistory
+                ?.firstOrNull()
+                ?.toByteArray()
+            ?: @Suppress("DEPRECATION") packageInfo.signatures
+                ?.firstOrNull()
+                ?.toByteArray()
+            ?: return@runCatching null
         val digest = MessageDigest.getInstance("SHA1").digest(signature)
         digest.joinToString(":") { byte -> "%02X".format(byte) }
     }.getOrNull()

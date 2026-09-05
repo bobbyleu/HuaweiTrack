@@ -990,10 +990,25 @@ class EditWifiGeofenceActivity : ComponentActivity() {
             return emptyList()
         }
         return try {
-            wifiManager.scanResults
+            // 华为/EMUI 等 ROM 在调用 getScanResults 前通常需先 startScan 触发一次扫描，
+            // 否则极易抛异常或返回空；startScan 失败也不影响后续读取
+            try {
+                @Suppress("DEPRECATION")
+                wifiManager.startScan()
+            } catch (_: Exception) {
+            }
+            val results = wifiManager.scanResults
+            if (results.isEmpty()) {
+                Toast.makeText(
+                    this,
+                    "未扫描到 WiFi，可改用「手动添加」输入 SSID/BSSID",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            results
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(this, "Wi-Fi 扫描失败：${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Wi-Fi 扫描失败：${e.message}", Toast.LENGTH_LONG).show()
             emptyList()
         }
     }

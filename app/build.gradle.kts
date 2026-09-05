@@ -23,8 +23,8 @@ android {
         minSdk = 31
         // 鸿蒙 4.x 安卓兼容层基于 Android 12(API 32)，实测 targetSdk ≥ 33 会被拒绝安装(解析包错误)
         targetSdk = 31
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
 
         val ciVersionCode = project.findProperty("versionCode") as String?
         val ciVersionName = project.findProperty("versionName") as String?
