@@ -42,7 +42,7 @@ object ClientCertHelper {
 
             val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
             // 传入 null 使用系统默认信任库
-            tmf.init(null)
+            tmf.init(null as KeyStore?)
 
             val sslContext = SSLContext.getInstance("TLS")
             sslContext.init(kmf.keyManagers, tmf.trustManagers, SecureRandom())

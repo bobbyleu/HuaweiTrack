@@ -116,7 +116,7 @@ class HassClient(
                 .addHeader("Content-Type", "application/json")
                 .post(requestBody)
 
-            NetworkMonitor.getHttpClient(resolveClientCert()).newCall(request.build()).use { response ->
+            NetworkMonitor.getHttpClient(resolveClientCert()).newCall(request.build()).execute().use { response ->
                 if (response.isSuccessful) {
                     val resJson = JSONObject(response.body.string())
 
