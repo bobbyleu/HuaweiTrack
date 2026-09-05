@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.launch
 import okio.withLock
+import org.nxy.hasstools.LogInterceptor
 import org.nxy.hasstools.R
 import org.nxy.hasstools.data.LocationDataStore
 import org.nxy.hasstools.data.UserDataStore
@@ -109,6 +110,44 @@ object LocationAlarmScheduler {
 
     fun cancelPlannedAlarm(context: Context) {
         cancelAlarm(context, nextPlannedAlarmPendingIntent)
+    }
+}
+
+/**
+ * 安全启动前台服务。
+ *
+ * Android 12（API 31）起对"后台启动前台服务"有严格限制，且 `startForegroundService` 要求
+ * 服务在 5 秒内调用 `startForeground`，否则系统会杀掉服务并抛出 RemoteServiceException；
+ * 各厂商 ROM（尤其鸿蒙/EMUI）实现差异还会额外抛 SecurityException。
+ *
+ * 任一异常若未被捕获，服务会崩溃并被 START_STICKY 反复拉起，
+ * 表现为系统提示"位置上报屡次停止运行"。
+ *
+ * 这里做双保险：优先 startForegroundService，失败则回退 startService，
+ * 两者都失败时只记录日志，绝不再向调用方抛出，从而切断崩溃循环。
+ */
+fun startForegroundServiceSafely(context: Context, intent: Intent, serviceName: String): Boolean {
+    try {
+        LogInterceptor.i("ServiceStarter", "startForegroundService: $serviceName")
+        context.startForegroundService(intent)
+        return true
+    } catch (e: Exception) {
+        LogInterceptor.e(
+            "ServiceStarter",
+            "startForegroundService($serviceName) 失败，尝试回退 startService：${e.stackTraceToString()}"
+        )
+    }
+
+    return try {
+        LogInterceptor.i("ServiceStarter", "回退 startService: $serviceName")
+        context.startService(intent)
+        true
+    } catch (e: Exception) {
+        LogInterceptor.e(
+            "ServiceStarter",
+            "startService($serviceName) 同样失败（已忽略，不触发崩溃循环）：${e.stackTraceToString()}"
+        )
+        false
     }
 }
 
@@ -263,7 +302,14 @@ class GetLocationManuallyForegroundService : Service() {
         // 创建前台通知
         val notification = createNotification()
 
-        startForeground(notificationId, notification, FOREGROUND_SERVICE_TYPE_LOCATION)
+        try {
+            startForeground(notificationId, notification, FOREGROUND_SERVICE_TYPE_LOCATION)
+        } catch (e: Exception) {
+            LogInterceptor.e(
+                "GetLocationManually",
+                "startForeground 失败：${e.stackTraceToString()}"
+            )
+        }
     }
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
@@ -360,9 +406,9 @@ class GetLocationManuallyForegroundService : Service() {
          */
         fun run(context: Context) {
             val serviceIntent = Intent(context, GetLocationManuallyForegroundService::class.java)
-            // Android 12(API 31)+ 要求用 startForegroundService 启动会变前台的服务，
-            // 否则抛 ForegroundServiceStartNotAllowedException 导致“位置上报屡次停止运行”
-            context.startForegroundService(serviceIntent)
+            startForegroundServiceSafely(
+                context, serviceIntent, "GetLocationManuallyForegroundService"
+            )
         }
     }
 }
@@ -397,7 +443,14 @@ class GetLocationPlannedForegroundService : Service() {
         // 创建前台通知
         val notification = createNotification()
 
-        startForeground(notificationId, notification, FOREGROUND_SERVICE_TYPE_LOCATION)
+        try {
+            startForeground(notificationId, notification, FOREGROUND_SERVICE_TYPE_LOCATION)
+        } catch (e: Exception) {
+            LogInterceptor.e(
+                "GetLocationPlanned",
+                "startForeground 失败：${e.stackTraceToString()}"
+            )
+        }
     }
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
@@ -544,9 +597,13 @@ class GetLocationPlannedForegroundService : Service() {
 
             val serviceIntent = Intent(context, GetLocationPlannedForegroundService::class.java)
 
-            // Android 12(API 31)+ 要求用 startForegroundService 启动会变前台的服务，
-            // 否则抛 ForegroundServiceStartNotAllowedException 导致“位置上报屡次停止运行”
-            context.startForegroundService(serviceIntent)
+            val started = startForegroundServiceSafely(
+                context, serviceIntent, "GetLocationPlannedForegroundService"
+            )
+            if (!started) {
+                // 启动失败时必须重置运行标记，否则后续计划定位将永远被判定为"正在运行"而无法调度
+                runningLock.withLock { isRunning = false }
+            }
 
             return null
         }

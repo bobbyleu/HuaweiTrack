@@ -97,6 +97,7 @@ import org.nxy.hasstools.objects.User
 import org.nxy.hasstools.objects.UserViewModel
 import org.nxy.hasstools.services.LOCATION_WORKING_STATUS_ACTION
 import org.nxy.hasstools.services.LocationWorkerStatus
+import org.nxy.hasstools.services.refreshKeepAliveConfig
 import org.nxy.hasstools.services.startLocationWork
 import org.nxy.hasstools.services.stopLocationWork
 import org.nxy.hasstools.ui.components.ButtonSettingsItem
@@ -268,6 +269,14 @@ class MainActivity : ComponentActivity() {
                 viewModel
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        // 从各配置子页面（Wi-Fi 地理围栏、网络偏好、高德 Key 等）返回主界面时，
+        // 通知运行中的保活服务按最新配置重新注册监听器，让改动立即生效，无需停用重启。
+        refreshKeepAliveConfig(this)
     }
 
     override fun onDestroy() {
@@ -708,9 +717,14 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun SettingsPage(context: Context, viewModel: MainActivityViewModel, padding: PaddingValues) {
         // 设置
-        val workingStatus by viewModel.workingStatus
-
-        val canEdit = workingStatus == LocationWorkerStatus.STOPPED
+        // 原先此处为 canEdit = (workingStatus == STOPPED)，即"定位运行时辅助功能全部置灰不可改"。
+        // 现改为运行时可编辑：
+        //   · 融合定位：定位服务每次取位置都会重新读取配置，改完立即生效；
+        //   · 网络状态触发器 / Wi-Fi 地理围栏：变更后通过 ACTION_REFRESH_CONFIG
+        //     通知保活服务重新注册监听器（KeepAliveForegroundService.refreshRegistrations），
+        //     无需"先停用再启用"才能让新配置生效。
+        // 因此取消运行期锁定。保留该变量以对接各设置项的 enabled 参数。
+        val canEdit = true
 
         Column(
             modifier = Modifier
@@ -917,6 +931,9 @@ class MainActivity : ComponentActivity() {
                     onCheckedChange = {
                         viewModel.networkTriggerEnabled.value = it
                         locationViewModel.setNetworkTriggerEnabled(it)
+                        // 通知运行中的保活服务立即按新配置重新注册网络监听器，
+                        // 无需"先停用再启用"；服务未运行时该广播无人接收，启动时会自行按配置注册
+                        refreshKeepAliveConfig(context)
                     }
                 )
 

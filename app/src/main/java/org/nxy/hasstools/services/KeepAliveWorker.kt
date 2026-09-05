@@ -26,6 +26,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.launch
+import org.nxy.hasstools.LogInterceptor
 import org.nxy.hasstools.R
 import org.nxy.hasstools.data.LocationDataStore
 import org.nxy.hasstools.data.UserDataStore
@@ -37,9 +38,19 @@ private object KeepAliveWorker {
     lateinit var serviceIntent: Intent
 }
 
+/** 配置刷新广播：让运行中的保活服务按最新配置重新注册监听器，无需停用再启用 */
+const val ACTION_REFRESH_CONFIG = "REFRESH_CONFIG"
+
+/** 通知运行中的保活服务刷新配置（网络状态触发器 / Wi-Fi 地理围栏变更时调用） */
+fun refreshKeepAliveConfig(context: Context) {
+    context.sendBroadcast(Intent(ACTION_REFRESH_CONFIG).apply { `package` = context.packageName })
+}
+
 fun startKeepAliveService(context: Context) {
     KeepAliveWorker.serviceIntent = Intent(context, KeepAliveForegroundService::class.java)
-    context.startForegroundService(KeepAliveWorker.serviceIntent)
+    startForegroundServiceSafely(
+        context, KeepAliveWorker.serviceIntent, "KeepAliveForegroundService"
+    )
 }
 
 fun stopKeepAliveService(context: Context) {
@@ -60,6 +71,10 @@ class KeepAliveForegroundService : Service() {
 
                 "STOP_SERVICE" -> {
                     stopSelf()
+                }
+
+                ACTION_REFRESH_CONFIG -> {
+                    refreshRegistrations()
                 }
             }
         }
@@ -295,15 +310,24 @@ class KeepAliveForegroundService : Service() {
         super.onCreate()
 
         println("KeepAliveForegroundService created")
+        LogInterceptor.i("KeepAlive", "onCreate：创建保活服务")
 
         // 创建前台通知
         val notification = createNotification()
 
-        startForeground(notificationId, notification)
+        // startForeground 若失败会直接毁掉服务，并被 START_STICKY 反复拉起，
+        // 表现为系统提示"位置上报屡次停止运行"。此处捕获并记录，不再让异常冒泡。
+        try {
+            startForeground(notificationId, notification)
+            LogInterceptor.i("KeepAlive", "startForeground 成功")
+        } catch (e: Exception) {
+            LogInterceptor.e("KeepAlive", "startForeground 失败：${e.stackTraceToString()}")
+        }
 
         val notificationActionFilter = IntentFilter().apply {
             addAction("LOCATE_ONCE")
             addAction("STOP_SERVICE")
+            addAction(ACTION_REFRESH_CONFIG)
         }
         registerReceiver(
             notificationActionReceiver,
@@ -311,36 +335,88 @@ class KeepAliveForegroundService : Service() {
             RECEIVER_NOT_EXPORTED
         )
 
+        // 注册网络 / Wi-Fi 监听器（内部逐项捕获异常，绝不让注册失败毁掉整个服务）
+        refreshRegistrations()
+    }
+
+    /**
+     * 按当前配置重新注册「网络状态监听器」与「Wi-Fi 扫描监听器」。
+     *
+     * 两个用途：
+     * 1. onCreate 时初始化；
+     * 2. 运行时修改配置（网络状态触发器开关、Wi-Fi 地理围栏增删改）后由
+     *    ACTION_REFRESH_CONFIG 广播触发，使配置立即生效，无需"先停用再启用"。
+     *
+     * 每个注册调用都单独捕获异常：厂商 ROM（尤其鸿蒙/EMUI）可能在
+     * registerNetworkCallback / registerScanResultsCallback 上抛 SecurityException
+     * 或 API 不可用异常；一旦异常冒泡，服务会崩溃并被 START_STICKY 反复拉起，
+     * 表现为系统提示"位置上报屡次停止运行"。
+     */
+    private fun refreshRegistrations() {
+        LogInterceptor.i("KeepAlive", "refreshRegistrations：按当前配置重新注册监听器")
+
         val locationConfig = LocationDataStore().readData()
 
-        if (locationConfig.networkTriggerEnabled) {
-            // 创建监听wifi和流量的监听器
+        // ---- 网络状态触发器 ----
+        try {
             val connectivityManager = getSystemService(ConnectivityManager::class.java)
-            connectivityManager?.registerNetworkCallback(
-                NetworkRequest.Builder()
-                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                    .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-                    .build(),
-                networkCallback
-            ) ?: println("ConnectivityManager 不可用，无法注册网络回调")
+            try {
+                connectivityManager?.unregisterNetworkCallback(networkCallback)
+            } catch (_: Exception) {
+                // 从未注册过时抛 IllegalArgumentException，忽略即可
+            }
+
+            if (!locationConfig.networkTriggerEnabled) {
+                LogInterceptor.i("KeepAlive", "网络状态触发器已关闭，未注册网络回调")
+            } else if (connectivityManager == null) {
+                LogInterceptor.w("KeepAlive", "ConnectivityManager 不可用，无法注册网络回调")
+            } else {
+                connectivityManager.registerNetworkCallback(
+                    NetworkRequest.Builder()
+                        .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                        .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+                        .build(),
+                    networkCallback
+                )
+                LogInterceptor.i("KeepAlive", "已注册网络状态回调（网络状态触发器已开启）")
+            }
+        } catch (e: Exception) {
+            LogInterceptor.e("KeepAlive", "注册网络回调失败：${e.stackTraceToString()}")
         }
 
-        if (scanResultsCallback.loadGeofences()) {
+        // ---- Wi-Fi 地理围栏（快速进入） ----
+        try {
             val wifiManager = getSystemService(WifiManager::class.java)
-            wifiManager?.let {
-                val executor = ContextCompat.getMainExecutor(this)
-                it.registerScanResultsCallback(executor, scanResultsCallback)
-            } ?: run {
-                scanResultsCallback.clearGeofences()
-                println("WifiManager 不可用，无法注册 Wi-Fi 扫描回调")
+            try {
+                wifiManager?.unregisterScanResultsCallback(scanResultsCallback)
+            } catch (_: Exception) {
             }
-        } else {
-            println("没有开启快速进入的地理围栏，未注册 Wi-Fi 扫描回调")
+
+            if (!scanResultsCallback.loadGeofences()) {
+                LogInterceptor.i("KeepAlive", "没有开启快速进入的地理围栏，未注册 Wi-Fi 扫描回调")
+            } else if (wifiManager == null) {
+                scanResultsCallback.clearGeofences()
+                LogInterceptor.w("KeepAlive", "WifiManager 不可用，无法注册 Wi-Fi 扫描回调")
+            } else {
+                val executor = ContextCompat.getMainExecutor(this)
+                wifiManager.registerScanResultsCallback(executor, scanResultsCallback)
+                LogInterceptor.i("KeepAlive", "已注册 Wi-Fi 扫描结果回调")
+            }
+        } catch (e: Exception) {
+            LogInterceptor.e("KeepAlive", "注册 Wi-Fi 扫描回调失败：${e.stackTraceToString()}")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         println("KeepAliveForegroundService onStartCommand: $intent")
+
+        // intent 为 null 表示服务是被系统拉起的重启（而非我们主动 start）。
+        // 日志中若反复出现这一行，即说明服务处于"崩溃→重启"循环。
+        if (intent == null) {
+            LogInterceptor.w("KeepAlive", "onStartCommand：intent 为空，服务被系统重启（可能处于崩溃循环）")
+        } else {
+            LogInterceptor.i("KeepAlive", "onStartCommand：action=${intent.action}")
+        }
 
         val userConfig = UserDataStore().readData()
 
@@ -348,7 +424,11 @@ class KeepAliveForegroundService : Service() {
         if (intent == null) {
             print("KeepAliveForegroundService 重启")
 
-            startLocationWork(applicationContext, userConfig)
+            try {
+                startLocationWork(applicationContext, userConfig)
+            } catch (e: Exception) {
+                LogInterceptor.e("KeepAlive", "重启时启动工作失败：${e.stackTraceToString()}")
+            }
         }
 
         // 广播启动
