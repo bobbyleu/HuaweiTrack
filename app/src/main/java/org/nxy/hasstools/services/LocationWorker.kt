@@ -15,6 +15,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.launch
@@ -270,7 +271,10 @@ class GetLocationManuallyForegroundService : Service() {
 
         val that = this
 
-        CoroutineScope(IO).launch updateLocation@{
+        CoroutineScope(IO + CoroutineExceptionHandler { _, e ->
+            e.printStackTrace()
+            that.setFatalError("定位处理异常：${e.message}")
+        }).launch updateLocation@{
             // 获取位置配置
             val locationConfig = LocationDataStore().readDataSync()
 
@@ -401,7 +405,10 @@ class GetLocationPlannedForegroundService : Service() {
 
         val that = this
 
-        CoroutineScope(IO).launch updateLocation@{
+        CoroutineScope(IO + CoroutineExceptionHandler { _, e ->
+            e.printStackTrace()
+            that.setFatalError("定位处理异常：${e.message}")
+        }).launch updateLocation@{
             // 获取位置配置
             val locationConfig = LocationDataStore().readData()
 

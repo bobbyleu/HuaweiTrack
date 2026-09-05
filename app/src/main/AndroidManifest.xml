@@ -115,8 +115,7 @@
             android:theme="@style/Theme.HassTools" />
 
         <service
-            android:name=".services.KeepAliveForegroundService"
-            android:foregroundServiceType="specialUse" />
+            android:name=".services.KeepAliveForegroundService" />
         <service
             android:name=".services.GetLocationPlannedForegroundService"
             android:foregroundServiceType="location" />
