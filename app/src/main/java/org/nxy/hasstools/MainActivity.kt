@@ -201,6 +201,10 @@ class MainActivity : ComponentActivity() {
 
                 when (type) {
                     -1 -> { // 删除
+                        // 清理该用户存储的 mTLS 客户端证书文件
+                        if (updatedUser.clientCertPath.isNotEmpty()) {
+                            java.io.File(updatedUser.clientCertPath).delete()
+                        }
                         viewModel.users.removeIf { it.userId == updatedUser.userId }
                         userViewModel.removeUserItem(updatedUser)
                     }

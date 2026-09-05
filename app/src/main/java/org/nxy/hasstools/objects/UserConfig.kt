@@ -23,6 +23,10 @@ data class User(
     val deviceId: String = "",
     val deviceName: String = "",
     val webhookId: String = "",
+    // mTLS 客户端证书（用于通过要求客户端证书的隧道，如 Cloudflare Access mTLS 访问 Home Assistant）
+    val clientCertEnabled: Boolean = false,
+    val clientCertPath: String = "",
+    val clientCertPassword: String = "",
 ) {
     companion object {
         const val REGISTER_USER_TYPE = "register"

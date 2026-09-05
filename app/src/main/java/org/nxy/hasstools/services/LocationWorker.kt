@@ -170,7 +170,16 @@ fun startLocationWork(context: Context, userConfig: UserConfig): Boolean {
         LocationWorkerStatus.set(context, LocationWorkerStatus.STARTING)
 
         LocationWorker.userClients = userConfig.items.filter { it.enabled }.map {
-            UserClient(it.userId, it.userName, HassClient(baseUrl = it.url, webhookId = it.webhookId))
+            UserClient(
+                it.userId,
+                it.userName,
+                HassClient(
+                    baseUrl = it.url,
+                    webhookId = it.webhookId,
+                    clientCertPath = if (it.clientCertEnabled) it.clientCertPath else "",
+                    clientCertPassword = if (it.clientCertEnabled) it.clientCertPassword else ""
+                )
+            )
         }
 
         if (!LocationAlarmScheduler.schedulePlannedExactAlarm(context, SystemClock.elapsedRealtime())) {

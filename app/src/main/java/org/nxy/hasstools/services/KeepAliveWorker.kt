@@ -163,18 +163,7 @@ class KeepAliveForegroundService : Service() {
                         ssidSet.contains(ssid) || bssidSet.contains(bssid)
                     }
 
-                    println(
-                        "地理围栏匹配：user=$userId zone=${geofence.zoneId} ssid=${
-                            ssidSet.joinToString(
-                                ","
-                            )
-                        } bssid=${
-                            bssidSet.joinToString(
-                                ","
-                            )
-                        } hasMatch=$anyMatch"
-                    )
-
+                    // 仅在命中后才输出日志，避免每次 WiFi 扫描都对每个围栏刷屏
                     if (!anyMatch) continue
 
                     // 2. 与上次结果比对：若相同，则略过，继续比对下一条
@@ -183,7 +172,7 @@ class KeepAliveForegroundService : Service() {
                         continue
                     }
 
-                    println("地理围栏匹配：${geofence.zoneId} != $lastZoneId，准备上报")
+                    println("地理围栏匹配：命中 zone=${geofence.zoneId}，准备上报")
 
                     // 3. 若不同：结束比对，基于该 zone 位置上报
                     matchedGeofence = geofence
@@ -191,7 +180,7 @@ class KeepAliveForegroundService : Service() {
                 }
 
                 if (matchedGeofence == null) {
-                    println("地理围栏匹配：没有命中任何新条目，跳过上报")
+                    // 未命中任何围栏：不打日志，避免刷屏
                     return@forEach
                 }
 

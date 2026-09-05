@@ -1,12 +1,15 @@
 package org.nxy.hasstools.ui.user
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -22,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -32,6 +36,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,7 +44,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import java.io.File
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers.IO
@@ -63,6 +70,12 @@ internal class EditUserViewModel : ViewModel() {
 
     val isReRegistering = mutableStateOf(false)
     val isTesting = mutableStateOf(false)
+
+    // 客户端证书（mTLS）
+    val clientCertEnabled = mutableStateOf(false)
+    val clientCertPath = mutableStateOf("")
+    val clientCertPassword = mutableStateOf("")
+    val clientCertFileName = mutableStateOf("")
 
     val deleteDialogVisible = mutableStateOf(false)
     val exitDialogVisible = mutableStateOf(false)
@@ -104,6 +117,9 @@ internal class EditUserViewModel : ViewModel() {
                 || deviceId.value.trim() != rawUser.value.deviceId
                 || deviceName.value.trim() != rawUser.value.deviceName
                 || webhookId.value.trim() != rawUser.value.webhookId
+                || clientCertEnabled.value != rawUser.value.clientCertEnabled
+                || clientCertPath.value.trim() != rawUser.value.clientCertPath
+                || clientCertPassword.value != rawUser.value.clientCertPassword
     }
 }
 
@@ -131,10 +147,28 @@ class EditUserActivity : ComponentActivity() {
             viewModel.deviceId.value = it.deviceId
             viewModel.deviceName.value = it.deviceName
             viewModel.webhookId.value = it.webhookId
+            viewModel.clientCertEnabled.value = it.clientCertEnabled
+            viewModel.clientCertPath.value = it.clientCertPath
+            viewModel.clientCertPassword.value = it.clientCertPassword
+            viewModel.clientCertFileName.value =
+                if (it.clientCertPath.isNotEmpty()) File(it.clientCertPath).name else ""
+        }
+
+        val certPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            val path = copyCertToPrivateStorage(uri, viewModel.rawUser.value.userId)
+            if (path != null) {
+                val old = viewModel.clientCertPath.value
+                if (old.isNotEmpty() && old != path) File(old).delete()
+                viewModel.clientCertPath.value = path
+                viewModel.clientCertFileName.value = File(path).name
+            } else {
+                Toast.makeText(this, "无法读取所选证书文件", Toast.LENGTH_SHORT).show()
+            }
         }
 
         setContent {
-            EditUserUI(viewModel)
+            EditUserUI(viewModel, certPickerLauncher)
         }
 
         // 返回键检查
@@ -257,7 +291,10 @@ class EditUserActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun EditUserUI(viewModel: EditUserViewModel) {
+    private fun EditUserUI(
+        viewModel: EditUserViewModel,
+        certPickerLauncher: ActivityResultLauncher<Array<String>>
+    ) {
         val userName = viewModel.userName
 
         val url = viewModel.url
@@ -356,7 +393,9 @@ class EditUserActivity : ComponentActivity() {
                                             baseUrl = url.value.trim(),
                                             token = token.value.trim(),
                                             deviceId = deviceId.value.trim(),
-                                            deviceName = deviceName.value.trim()
+                                            deviceName = deviceName.value.trim(),
+                                            clientCertPath = if (viewModel.clientCertEnabled.value) viewModel.clientCertPath.value else "",
+                                            clientCertPassword = if (viewModel.clientCertEnabled.value) viewModel.clientCertPassword.value else ""
                                         )
 
                                         val newWebhookId = hassClient.registerDevice(this@EditUserActivity)
@@ -416,7 +455,9 @@ class EditUserActivity : ComponentActivity() {
                                 CoroutineScope(IO).launch {
                                     val hassClient = HassClient(
                                         baseUrl = url.value.trim(),
-                                        webhookId = webhookId.value.trim()
+                                        webhookId = webhookId.value.trim(),
+                                        clientCertPath = if (viewModel.clientCertEnabled.value) viewModel.clientCertPath.value else "",
+                                        clientCertPassword = if (viewModel.clientCertEnabled.value) viewModel.clientCertPassword.value else ""
                                     )
 
                                     try {
@@ -447,6 +488,60 @@ class EditUserActivity : ComponentActivity() {
                             enabled = viewModel.canTest()
                         ) {
                             Text("验证")
+                        }
+                    }
+
+                    // 客户端证书（mTLS，可选）
+                    TitleCard(
+                        title = "客户端证书（mTLS，可选）"
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "启用客户端证书",
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = viewModel.clientCertEnabled.value,
+                                onCheckedChange = { viewModel.clientCertEnabled.value = it }
+                            )
+                        }
+
+                        AnimatedVisibility(visible = viewModel.clientCertEnabled.value) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(onClick = { certPickerLauncher.launch(arrayOf("*/*")) }) {
+                                        Text("选择证书文件 (.p12)")
+                                    }
+                                    Text(
+                                        text = if (viewModel.clientCertFileName.value.isNotEmpty()) viewModel.clientCertFileName.value else "未选择",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                OutlinedTextField(
+                                    value = viewModel.clientCertPassword.value,
+                                    onValueChange = { viewModel.clientCertPassword.value = it },
+                                    label = { Text("证书密码") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    visualTransformation = PasswordVisualTransformation()
+                                )
+
+                                Text(
+                                    text = "将 .p12 客户端证书（含私钥）拷贝到本应用私有目录，用于向要求客户端证书的 Home Assistant 隧道（如 Cloudflare Access mTLS）出示身份。服务端证书仍由系统默认信任库验证。",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                         }
                     }
 
@@ -554,6 +649,11 @@ class EditUserActivity : ComponentActivity() {
         val deviceName = viewModel.deviceName.value.trim()
         val webhookId = viewModel.webhookId.value.trim()
 
+        // 禁用客户端证书时，删除已存储的证书文件
+        if (!viewModel.clientCertEnabled.value && viewModel.clientCertPath.value.isNotEmpty()) {
+            File(viewModel.clientCertPath.value).delete()
+        }
+
         // 通过activityResult返回，然后关闭当前页面
         val intent = Intent()
         intent.putExtra("type", 0)
@@ -565,11 +665,29 @@ class EditUserActivity : ComponentActivity() {
                     token = token,
                     deviceId = deviceId,
                     deviceName = deviceName,
-                    webhookId = webhookId
+                    webhookId = webhookId,
+                    clientCertEnabled = viewModel.clientCertEnabled.value,
+                    clientCertPath = viewModel.clientCertPath.value,
+                    clientCertPassword = viewModel.clientCertPassword.value
                 )
             )
         )
         setResult(RESULT_OK, intent)
+    }
+
+    private fun copyCertToPrivateStorage(uri: Uri, userId: String): String? {
+        return try {
+            val dir = File(filesDir, "certs")
+            if (!dir.exists()) dir.mkdirs()
+            val dest = File(dir, "user_$userId.p12")
+            contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            dest.absolutePath
+        } catch (e: Throwable) {
+            e.printStackTrace()
+            null
+        }
     }
 
     private fun deleteUserItem(viewModel: EditUserViewModel) {

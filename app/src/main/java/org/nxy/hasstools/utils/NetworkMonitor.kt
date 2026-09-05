@@ -13,6 +13,7 @@ import org.nxy.hasstools.objects.NetworkConfig
 import org.nxy.hasstools.objects.NetworkPreference
 import org.nxy.hasstools.objects.ProxyRequirement
 import org.nxy.hasstools.objects.VpnNetworkPreference
+import org.nxy.hasstools.utils.ClientCertInfo
 import java.net.Proxy
 
 class NetworkMonitor(private val config: NetworkConfig) {
@@ -370,6 +371,16 @@ class NetworkMonitor(private val config: NetworkConfig) {
         @Volatile
         private var lastHandle: Long? = null
 
+        @Volatile
+        private var lastCertId: String? = null
+
+        // 默认网络（未启用网络偏好）下挂载了客户端证书的客户端缓存
+        @Volatile
+        private var defaultCertHttpClient: OkHttpClient? = null
+
+        @Volatile
+        private var defaultCertId: String? = null
+
         fun load() {
             if (instance == null) {
                 println("NetworkMonitor reloading with new config: ${NetworkDataStore().readData()}")
@@ -387,6 +398,9 @@ class NetworkMonitor(private val config: NetworkConfig) {
             // 强制下次重建
             lastHttpClient = null
             lastHandle = null
+            lastCertId = null
+            defaultCertHttpClient = null
+            defaultCertId = null
 
             println("NetworkMonitor unloaded")
         }
@@ -402,26 +416,51 @@ class NetworkMonitor(private val config: NetworkConfig) {
         }
 
         @Synchronized
-        fun getHttpClient(): OkHttpClient {
+        fun getHttpClient(clientCert: ClientCertInfo? = null): OkHttpClient {
             val pickedNetwork = getNetwork()
 
             if (pickedNetwork == null) {
-                println("HttpClient using default network")
-                return defaultHttpClient
-            }
+                if (clientCert == null) {
+                    println("HttpClient using default network")
+                    return defaultHttpClient
+                }
 
-            var httpClient = lastHttpClient ?: defaultHttpClient
+                // 默认网络 + 客户端证书：同样必须挂载 mTLS，
+                // 否则"未启用网络偏好、仅使用证书"的用户证书永远不生效
+                val certId = clientCert.id
+                if (defaultCertHttpClient != null && defaultCertId == certId) {
+                    return defaultCertHttpClient!!
+                }
+
+                val client = defaultHttpClient.newBuilder().apply {
+                    sslSocketFactory(clientCert.sslSocketFactory, clientCert.trustManager)
+                }.build()
+
+                defaultCertHttpClient = client
+                defaultCertId = certId
+
+                println("HttpClient using default network with client certificate (mTLS)")
+                return client
+            }
 
             val handle = pickedNetwork.networkHandle
+            val certId = clientCert?.id ?: ""
 
-            if (handle == lastHandle) {
+            if (handle == lastHandle && certId == lastCertId && lastHttpClient != null) {
                 println("HttpClient reusing existing client for network: $pickedNetwork")
-                return httpClient
+                return lastHttpClient!!
             }
 
-            httpClient = httpClient.newBuilder().apply {
+            // 始终从干净的基础客户端重建，避免复用上次可能残留的 sslSocketFactory
+            val httpClient = defaultHttpClient.newBuilder().apply {
                 socketFactory(pickedNetwork.socketFactory)
                 dns { host -> pickedNetwork.getAllByName(host).toList() }
+
+                // 客户端证书（mTLS）：叠加在已绑定网卡的基础上
+                if (clientCert != null) {
+                    sslSocketFactory(clientCert.sslSocketFactory, clientCert.trustManager)
+                    println("HttpClient configured with client certificate (mTLS)")
+                }
 
                 // eventListenerFactory { VerboseEventListener() }
 
@@ -437,6 +476,7 @@ class NetworkMonitor(private val config: NetworkConfig) {
 
             lastHttpClient = httpClient
             lastHandle = handle
+            lastCertId = certId
 
             println("HttpClient switched to network: $pickedNetwork")
 

@@ -1,11 +1,15 @@
 package org.nxy.hasstools.ui.user
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -30,6 +34,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -43,6 +48,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -71,11 +78,14 @@ import org.nxy.hasstools.R
 import org.nxy.hasstools.objects.User
 import org.nxy.hasstools.ui.components.CommonPage
 import org.nxy.hasstools.ui.components.IconDialog
+import org.nxy.hasstools.ui.components.TitleCard
 import org.nxy.hasstools.ui.theme.AppTheme
 import org.nxy.hasstools.utils.HassClient
 import org.nxy.hasstools.utils.Json
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 import kotlin.math.abs
 
 internal class CreateUserViewModel : ViewModel() {
@@ -90,6 +100,15 @@ internal class CreateUserViewModel : ViewModel() {
     val deviceName = mutableStateOf("")
 
     val webhookId = mutableStateOf("")
+
+    // 证书文件使用稳定的临时 userId 命名，保存时复用为最终 userId，保证编辑页证书文件一致
+    val tempUserId = mutableStateOf(UUID.randomUUID().toString())
+
+    // 客户端证书（mTLS）
+    val clientCertEnabled = mutableStateOf(false)
+    val clientCertPath = mutableStateOf("")
+    val clientCertPassword = mutableStateOf("")
+    val clientCertFileName = mutableStateOf("")
 
     val userName = mutableStateOf("")
 
@@ -150,8 +169,21 @@ class CreateUserActivity : ComponentActivity() {
 
         val viewModel by viewModels<CreateUserViewModel>()
 
+        val certPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            val path = copyCertToPrivateStorage(uri, viewModel.tempUserId.value)
+            if (path != null) {
+                val old = viewModel.clientCertPath.value
+                if (old.isNotEmpty() && old != path) File(old).delete()
+                viewModel.clientCertPath.value = path
+                viewModel.clientCertFileName.value = File(path).name
+            } else {
+                Toast.makeText(this, "无法读取所选证书文件", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         setContent {
-            CreateUserUI(viewModel)
+            CreateUserUI(viewModel, certPickerLauncher)
         }
 
         // 返回键检查
@@ -240,7 +272,10 @@ class CreateUserActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun CreateUserUI(viewModel: CreateUserViewModel) {
+    private fun CreateUserUI(
+        viewModel: CreateUserViewModel,
+        certPickerLauncher: ActivityResultLauncher<Array<String>>
+    ) {
         val step = viewModel.step
 
         val url = viewModel.url
@@ -550,7 +585,9 @@ class CreateUserActivity : ComponentActivity() {
                                                 baseUrl = url.value.trim(),
                                                 token = token.value.trim(),
                                                 deviceId = deviceId.value.trim(),
-                                                deviceName = deviceName.value.trim()
+                                                deviceName = deviceName.value.trim(),
+                                                clientCertPath = if (viewModel.clientCertEnabled.value) viewModel.clientCertPath.value else "",
+                                                clientCertPassword = if (viewModel.clientCertEnabled.value) viewModel.clientCertPassword.value else ""
                                             )
 
                                             val newWebhookId = hassClient.registerDevice(this@CreateUserActivity)
@@ -661,6 +698,9 @@ class CreateUserActivity : ComponentActivity() {
                             )
                         }
                     }
+
+                ClientCertCard(viewModel, certPickerLauncher)
+
                 }
             }
 
@@ -1030,6 +1070,65 @@ class CreateUserActivity : ComponentActivity() {
         }
     }
 
+    @Composable
+    private fun ClientCertCard(
+        viewModel: CreateUserViewModel,
+        launcher: ActivityResultLauncher<Array<String>>
+    ) {
+        TitleCard(
+            title = "客户端证书（mTLS，可选）"
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "启用客户端证书",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = viewModel.clientCertEnabled.value,
+                    onCheckedChange = { viewModel.clientCertEnabled.value = it }
+                )
+            }
+
+            AnimatedVisibility(visible = viewModel.clientCertEnabled.value) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(onClick = { launcher.launch(arrayOf("*/*")) }) {
+                            Text("选择证书文件 (.p12)")
+                        }
+                        Text(
+                            text = if (viewModel.clientCertFileName.value.isNotEmpty()) viewModel.clientCertFileName.value else "未选择",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = viewModel.clientCertPassword.value,
+                        onValueChange = { viewModel.clientCertPassword.value = it },
+                        label = { Text("证书密码") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+
+                    Text(
+                        text = "将 .p12 客户端证书（含私钥）拷贝到本应用私有目录，用于向要求客户端证书的 Home Assistant 隧道（如 Cloudflare Access mTLS）出示身份。服务端证书仍由系统默认信任库验证。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+    }
+
     private fun saveUserItem(viewModel: CreateUserViewModel) {
         // 从UI中获取数据
         val userType = viewModel.type.intValue
@@ -1045,6 +1144,7 @@ class CreateUserActivity : ComponentActivity() {
         intent.putExtra(
             "item", Json.encodeToString(
                 User(
+                    userId = viewModel.tempUserId.value,
                     userType = if (userType == 0) User.REGISTER_USER_TYPE else User.BIND_USER_TYPE,
                     userName = userName,
                     url = url,
@@ -1052,10 +1152,28 @@ class CreateUserActivity : ComponentActivity() {
                     deviceId = deviceId,
                     deviceName = deviceName,
                     webhookId = webhookId,
+                    clientCertEnabled = viewModel.clientCertEnabled.value,
+                    clientCertPath = viewModel.clientCertPath.value,
+                    clientCertPassword = viewModel.clientCertPassword.value,
                 )
             )
         )
         setResult(RESULT_OK, intent)
+    }
+
+    private fun copyCertToPrivateStorage(uri: Uri, userId: String): String? {
+        return try {
+            val dir = File(filesDir, "certs")
+            if (!dir.exists()) dir.mkdirs()
+            val dest = File(dir, "user_$userId.p12")
+            contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            dest.absolutePath
+        } catch (e: Throwable) {
+            e.printStackTrace()
+            null
+        }
     }
 
 //    @Preview(showBackground = true)

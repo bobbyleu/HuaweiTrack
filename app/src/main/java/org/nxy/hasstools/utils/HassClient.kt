@@ -7,6 +7,8 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import org.nxy.hasstools.utils.ClientCertHelper
+import org.nxy.hasstools.utils.ClientCertInfo
 import java.io.IOException
 
 /**
@@ -25,9 +27,26 @@ class HassClient(
     private var token: String? = null,
     private var deviceId: String? = null,
     private var deviceName: String? = null,
-    private var webhookId: String? = null
+    private var webhookId: String? = null,
+    private var clientCertPath: String? = null,
+    private var clientCertPassword: String? = null
 ) {
     private var cachedZones: List<Zone>? = null
+
+    // mTLS 客户端证书（惰性加载，避免每次请求重复读取 p12）
+    private var clientCertInfo: ClientCertInfo? = null
+    private var clientCertResolved = false
+
+    private fun resolveClientCert(): ClientCertInfo? {
+        if (clientCertResolved) return clientCertInfo
+        clientCertResolved = true
+        val path = clientCertPath
+        val password = clientCertPassword
+        if (!path.isNullOrEmpty() && !password.isNullOrEmpty()) {
+            clientCertInfo = ClientCertHelper.build(path, password)
+        }
+        return clientCertInfo
+    }
 
     /**
      * 注册设备到 Home Assistant。
@@ -97,7 +116,7 @@ class HassClient(
                 .addHeader("Content-Type", "application/json")
                 .post(requestBody)
 
-            NetworkMonitor.getHttpClient().newCall(request.build()).execute().use { response ->
+            NetworkMonitor.getHttpClient(resolveClientCert()).newCall(request.build()).use { response ->
                 if (response.isSuccessful) {
                     val resJson = JSONObject(response.body.string())
 
@@ -135,7 +154,7 @@ class HassClient(
             .post(requestBody)
             .build()
 
-        NetworkMonitor.getHttpClient().newCall(request).execute().use { response ->
+        NetworkMonitor.getHttpClient(resolveClientCert()).newCall(request).execute().use { response ->
             if (response.isSuccessful) {
                 val resBody = response.body.string()
 
